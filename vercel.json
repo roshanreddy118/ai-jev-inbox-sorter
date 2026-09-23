@@ -1,0 +1,7 @@
+{
+  "functions": {
+    "api/sort.py": {
+      "maxDuration": 60
+    }
+  }
+}

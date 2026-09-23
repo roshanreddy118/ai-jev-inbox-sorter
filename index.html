@@ -1,0 +1,358 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Jev Inbox Sorter</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --brand1:#7c3aed; --brand2:#db2777;
+      --ink:#2a1a4a; --muted:#6b4d82; --faint:#8a6ba3;
+      --spam:#be185d; --spam-bg:#fbd0e4; --spam-bar:#db2777;
+      --ok:#0f766e; --ok-bg:#ccfbf1;
+      --card:rgba(255,255,255,.55); --card-brd:rgba(255,255,255,.7);
+      --field:rgba(255,255,255,.6);
+      --danger:#e11d48; --danger-bg:#ffe4e6;
+      --radius:20px; --radius-sm:12px;
+      --s1:8px; --s2:12px; --s3:16px; --s4:20px; --s5:28px;
+    }
+    * { box-sizing:border-box; }
+    html,body { margin:0; }
+    body {
+      font-family:Inter,-apple-system,Segoe UI,Roboto,sans-serif;
+      color:var(--ink); min-height:100vh; padding:var(--s5) var(--s3) 48px;
+      background:#f3eefc;
+      background-image:
+        radial-gradient(70% 60% at 12% 8%, rgba(167,139,250,.85), transparent 70%),
+        radial-gradient(70% 55% at 96% 16%, rgba(249,168,212,.8), transparent 70%),
+        radial-gradient(85% 70% at 72% 100%, rgba(253,186,116,.75), transparent 72%);
+      background-attachment:fixed;
+    }
+    .wrap { max-width:420px; margin:0 auto; }
+    .grid { display:block; }
+
+    header { display:flex; align-items:center; gap:12px; margin-bottom:var(--s4); }
+
+    /* Desktop / laptop: two-column layout */
+    @media (min-width:900px) {
+      body { padding-top:40px; }
+      .wrap { max-width:960px; }
+      .grid { display:grid; grid-template-columns:420px 1fr; gap:var(--s4);
+              align-items:start; }
+      .controls { min-width:0; }
+      .results { min-width:0; position:sticky; top:40px; }
+      .results .card { margin-bottom:0; }
+      /* keep the result list from running too tall on big screens */
+      #out { max-height:calc(100vh - 96px); overflow:auto; }
+    }
+    .logo { width:44px; height:44px; border-radius:14px; display:grid; place-items:center;
+            color:#fff; font-weight:800; font-size:22px;
+            background:linear-gradient(135deg,var(--brand1),var(--brand2));
+            box-shadow:0 8px 20px rgba(124,58,237,.35); }
+    header h1 { font-size:18px; font-weight:700; margin:0; }
+    header p { font-size:12px; color:var(--muted); margin:2px 0 0; }
+
+    .card {
+      background:var(--card); border:1px solid var(--card-brd); border-radius:var(--radius);
+      padding:var(--s4); margin-bottom:var(--s3);
+      backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px);
+      box-shadow:0 10px 30px rgba(80,40,120,.12);
+    }
+    .card h2 { font-size:13px; font-weight:700; margin:0 0 2px; }
+    .card .hint { font-size:11px; color:var(--faint); margin:0 0 var(--s3); }
+
+    label { display:block; font-size:11px; font-weight:600; color:var(--muted);
+            margin:var(--s3) 0 6px; }
+    label:first-of-type { margin-top:0; }
+    .field { position:relative; }
+    input[type=email], input[type=password] {
+      width:100%; padding:13px 42px 13px 14px; font-size:15px; color:var(--ink);
+      background:var(--field); border:1px solid var(--card-brd); border-radius:var(--radius-sm);
+      font-family:inherit; outline:none; }
+    input::placeholder { color:var(--faint); }
+    input:focus { border-color:var(--brand1); box-shadow:0 0 0 3px rgba(124,58,237,.15); }
+    .field .icon { position:absolute; right:12px; top:50%; transform:translateY(-50%);
+                   background:none; border:0; cursor:pointer; font-size:15px; padding:4px;
+                   color:var(--faint); }
+
+    .apphint { display:flex; gap:8px; align-items:center; margin-top:var(--s3);
+               padding:10px 12px; border-radius:10px; background:rgba(255,255,255,.45);
+               font-size:11px; color:var(--muted); }
+    .apphint a { color:var(--brand1); font-weight:600; text-decoration:none; }
+
+    .rowhead { display:flex; justify-content:space-between; align-items:baseline; }
+    .rowhead .val { font-size:15px; font-weight:800;
+                    background:linear-gradient(135deg,var(--brand1),var(--brand2));
+                    -webkit-background-clip:text; background-clip:text; color:transparent; }
+    input[type=range] { -webkit-appearance:none; appearance:none; width:100%; height:6px;
+      border-radius:3px; margin:14px 0 6px; outline:none;
+      background:linear-gradient(90deg,var(--brand1),var(--brand2)) no-repeat;
+      background-size:var(--fill,80%) 100%;
+      background-color:rgba(124,58,237,.18); }
+    input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; width:22px; height:22px;
+      border-radius:50%; background:#fff; border:0; cursor:pointer;
+      box-shadow:0 2px 8px rgba(80,40,120,.35); }
+    input[type=range]::-moz-range-thumb { width:22px; height:22px; border-radius:50%;
+      background:#fff; border:0; cursor:pointer; box-shadow:0 2px 8px rgba(80,40,120,.35); }
+    .scale { display:flex; justify-content:space-between; font-size:10px; color:var(--faint); }
+
+    .steprow { display:flex; justify-content:space-between; align-items:center;
+               margin-top:var(--s4); }
+    .steprow span { font-size:13px; font-weight:600; }
+    .stepper { display:flex; align-items:center; gap:2px; background:var(--field);
+               border:1px solid var(--card-brd); border-radius:999px; padding:3px; }
+    .stepper button { width:30px; height:30px; border:0; border-radius:50%; cursor:pointer;
+                      background:transparent; font-size:18px; color:var(--ink); font-weight:600; }
+    .stepper button:active { background:rgba(124,58,237,.15); }
+    .stepper .n { min-width:34px; text-align:center; font-weight:800; font-size:14px; }
+
+    .toggle { display:flex; justify-content:space-between; align-items:center;
+              margin-top:var(--s4); padding:12px 14px; border-radius:var(--radius-sm);
+              background:var(--field); transition:.2s; }
+    .toggle.on { background:var(--danger-bg); }
+    .toggle .tlabel { font-size:12px; font-weight:600; }
+    .toggle.on .tlabel { color:var(--danger); }
+    .toggle .tsub { font-size:10px; color:var(--faint); margin-top:2px; }
+    .toggle.on .tsub { color:var(--danger); opacity:.85; }
+    .sw { width:44px; height:26px; border-radius:999px; background:#d8cfe6; position:relative;
+          cursor:pointer; flex:none; transition:.2s; border:0; }
+    .sw::after { content:""; position:absolute; top:3px; left:3px; width:20px; height:20px;
+                 border-radius:50%; background:#fff; transition:.2s; box-shadow:0 1px 3px rgba(0,0,0,.2); }
+    .sw.on { background:var(--danger); }
+    .sw.on::after { left:21px; }
+
+    .cta { width:100%; padding:15px; border:0; border-radius:14px; cursor:pointer;
+           font-family:inherit; font-size:15px; font-weight:800; color:#fff; margin-top:4px;
+           background:linear-gradient(135deg,var(--brand1),var(--brand2));
+           box-shadow:0 10px 24px rgba(124,58,237,.4); transition:.15s; }
+    .cta.danger { background:linear-gradient(135deg,#f43f5e,#e11d48);
+                  box-shadow:0 10px 24px rgba(225,29,72,.4); }
+    .cta:disabled { opacity:.6; cursor:default; }
+
+    .chips { display:flex; gap:8px; margin-bottom:var(--s2); flex-wrap:wrap; }
+    .chip { font-size:11px; font-weight:700; padding:7px 13px; border-radius:999px;
+            font-family:inherit; border:1.5px solid transparent; cursor:pointer;
+            transition:.15s; }
+    .chip.move { background:var(--spam-bg); color:var(--spam); }
+    .chip.keep { background:var(--ok-bg); color:var(--ok); }
+    .chip.info { background:rgba(255,255,255,.5); color:var(--muted); }
+    .chip:hover { filter:brightness(.97); }
+    .chip.move.active { border-color:var(--spam); box-shadow:0 2px 8px rgba(219,39,119,.25); }
+    .chip.keep.active { border-color:var(--ok); box-shadow:0 2px 8px rgba(15,118,110,.2); }
+    .chip.info.active { border-color:var(--muted); }
+
+    .item { display:flex; align-items:center; gap:10px; padding:11px 0;
+            border-top:1px solid rgba(124,58,237,.12); }
+    .item:first-child { border-top:0; }
+    .bar { width:4px; align-self:stretch; border-radius:2px; background:var(--ok); flex:none; }
+    .item.spam .bar { background:var(--spam-bar); }
+    .item .meta { min-width:0; flex:1; }
+    .item .subj { font-size:12.5px; font-weight:500; white-space:nowrap; overflow:hidden;
+                  text-overflow:ellipsis; }
+    .item .from { font-size:10.5px; color:var(--faint); white-space:nowrap; overflow:hidden;
+                  text-overflow:ellipsis; margin-top:1px; }
+    .tag { font-size:10px; font-weight:700; padding:4px 9px; border-radius:999px; flex:none; }
+    .tag.move { background:var(--spam-bg); color:var(--spam); }
+    .tag.keep { background:var(--ok-bg); color:var(--ok); }
+    .tag.low  { background:rgba(255,255,255,.55); color:var(--muted); }
+
+    /* empty state: hidden on mobile (would just be dead space), shown on desktop */
+    .empty { display:none; text-align:center; }
+    .emptyIcon { font-size:34px; }
+    .emptyTitle { font-weight:700; font-size:14px; margin-top:8px; }
+    .emptyText { font-size:12px; color:var(--faint); margin-top:4px; }
+    @media (min-width:900px) { .empty { display:block; } }
+
+    .status { font-size:13px; color:var(--muted); text-align:center; padding:8px 0; }
+    .err { color:var(--danger); font-weight:600; text-align:center; padding:8px 0; }
+    .spin { display:inline-block; width:16px; height:16px; border:2px solid rgba(124,58,237,.3);
+            border-top-color:var(--brand1); border-radius:50%; animation:sp .7s linear infinite;
+            vertical-align:-3px; margin-right:8px; }
+    @keyframes sp { to { transform:rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="logo">J</div>
+      <div>
+        <h1>Jev Inbox Sorter</h1>
+        <p>Smart spam triage · powered by Jev</p>
+      </div>
+    </header>
+
+    <div class="grid">
+     <div class="controls">
+    <div class="card">
+      <h2>Connect Gmail</h2>
+      <p class="hint">App password only — used for this run, never stored.</p>
+
+      <label for="gmail">Gmail address</label>
+      <div class="field">
+        <input id="gmail" type="email" autocomplete="username" placeholder="you@gmail.com" />
+        <span class="icon" aria-hidden="true">📧</span>
+      </div>
+
+      <label for="pw">App password</label>
+      <div class="field">
+        <input id="pw" type="password" autocomplete="current-password" placeholder="xxxx xxxx xxxx xxxx" />
+        <button class="icon" id="reveal" type="button" aria-label="Show password">👁</button>
+      </div>
+
+      <div class="apphint">
+        🔒 <span>Need one? Google Account →
+          <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener">App passwords</a></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="rowhead">
+        <h2>Sensitivity</h2>
+        <span class="val" id="threshVal">0.90</span>
+      </div>
+      <input id="threshold" type="range" min="0.5" max="1" step="0.01" value="0.9" />
+      <div class="scale"><span>Fewer moves</span><span>Aggressive</span></div>
+
+      <div class="steprow">
+        <span>Check last unread</span>
+        <div class="stepper">
+          <button id="minus" type="button" aria-label="Decrease">−</button>
+          <span class="n" id="limitN">12</span>
+          <button id="plus" type="button" aria-label="Increase">+</button>
+        </div>
+      </div>
+
+      <div class="toggle" id="toggle">
+        <div>
+          <div class="tlabel" id="tlabel">Preview only</div>
+          <div class="tsub" id="tsub">Nothing will be moved</div>
+        </div>
+        <button class="sw" id="sw" type="button" role="switch" aria-checked="false" aria-label="Toggle move mode"></button>
+      </div>
+    </div>
+
+    <button class="cta" id="run">Preview classification</button>
+     </div><!-- /.controls -->
+
+     <div class="results">
+       <div class="card empty" id="emptyState">
+         <div class="emptyIcon">📥</div>
+         <div class="emptyTitle">No results yet</div>
+         <div class="emptyText">Enter your Gmail and press Preview. Classified
+           messages will appear here.</div>
+       </div>
+       <div class="card" id="out" style="display:none"></div>
+     </div>
+    </div><!-- /.grid -->
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const pw = $("pw"), thresh = $("threshold"), threshVal = $("threshVal");
+    const limitN = $("limitN"), sw = $("sw"), toggle = $("toggle");
+    const tlabel = $("tlabel"), tsub = $("tsub"), runBtn = $("run"), out = $("out");
+    let limit = 12, live = false;
+
+    // slider fill + value
+    function paintSlider() {
+      const min = 0.5, max = 1, v = parseFloat(thresh.value);
+      thresh.style.setProperty("--fill", ((v - min) / (max - min) * 100) + "%");
+      threshVal.textContent = v.toFixed(2);
+    }
+    thresh.addEventListener("input", paintSlider); paintSlider();
+
+    // stepper (1..20)
+    $("minus").onclick = () => { limit = Math.max(1, limit - 1); limitN.textContent = limit; };
+    $("plus").onclick  = () => { limit = Math.min(20, limit + 1); limitN.textContent = limit; };
+
+    // reveal password
+    $("reveal").onclick = () => { pw.type = pw.type === "password" ? "text" : "password"; };
+
+    // live toggle with danger state
+    function setLive(on) {
+      live = on;
+      sw.classList.toggle("on", on); sw.setAttribute("aria-checked", on);
+      toggle.classList.toggle("on", on);
+      tlabel.textContent = on ? "Move spam for real" : "Preview only";
+      tsub.textContent = on ? "Confident spam will be moved to Spam" : "Nothing will be moved";
+      runBtn.textContent = on ? "Move spam now" : "Preview classification";
+      runBtn.classList.toggle("danger", on);
+    }
+    sw.onclick = () => setLive(!live);
+
+    function tag(it) {
+      if (it.moved) return `<span class="tag move">${live ? "MOVED" : "MOVE"} ·${it.confidence.toFixed(2)}</span>`;
+      if (it.choice === "SPAM") return `<span class="tag low">spam ${it.confidence.toFixed(2)}</span>`;
+      return `<span class="tag keep">keep</span>`;
+    }
+    const esc = (s) => (s || "").replace(/[&<>"']/g,
+      c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+    // last results + which filter is active: "all" | "moved" | "kept"
+    let lastData = null, filter = "all";
+
+    function renderRows() {
+      const d = lastData;
+      const verb = d.live ? "Moved" : "Would move";
+      const rows = d.items.filter(it =>
+        filter === "all" ? true :
+        filter === "moved" ? it.moved : !it.moved);
+
+      let html = `<div class="chips">
+        <button class="chip move ${filter==='moved'?'active':''}" data-f="moved">${verb} ${d.moved}</button>
+        <button class="chip keep ${filter==='kept'?'active':''}" data-f="kept">Kept ${d.kept}</button>
+        <button class="chip info ${filter==='all'?'active':''}" data-f="all">Checked ${d.checked}${d.skipped ? " · skipped " + d.skipped : ""}</button>
+      </div>`;
+
+      if (!d.items.length) html += `<div class="status">No unread messages to check.</div>`;
+      else if (!rows.length) html += `<div class="status">Nothing in this filter.</div>`;
+      for (const it of rows) {
+        const isSpam = it.moved || it.choice === "SPAM";
+        html += `<div class="item ${isSpam ? "spam" : ""}">
+          <div class="bar"></div>
+          <div class="meta">
+            <div class="subj">${esc(it.subject) || "(no subject)"}</div>
+            <div class="from">${esc(it.from)}</div>
+          </div>${tag(it)}</div>`;
+      }
+      out.innerHTML = html;
+      out.querySelectorAll(".chip[data-f]").forEach(c => c.onclick = () => {
+        const f = c.dataset.f;
+        filter = (filter === f && f !== "all") ? "all" : f;  // click active to clear
+        renderRows();
+      });
+    }
+
+    runBtn.onclick = async () => {
+      const body = {
+        gmail: $("gmail").value.trim(), app_password: pw.value,
+        threshold: parseFloat(thresh.value), limit, live,
+      };
+      const empty = $("emptyState"); if (empty) empty.style.display = "none";
+      out.style.display = "block";
+      if (!body.gmail || !body.app_password) {
+        out.innerHTML = `<div class="err">Enter your Gmail address and app password.</div>`;
+        return;
+      }
+      const label = runBtn.textContent;
+      runBtn.disabled = true; runBtn.textContent = live ? "Moving…" : "Analyzing…";
+      out.innerHTML = `<div class="status"><span class="spin"></span>Contacting Gmail and Jev… up to a minute.</div>`;
+      try {
+        const res = await fetch("/api/sort", {
+          method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body),
+        });
+        const data = await res.json();
+        if (!res.ok) { out.innerHTML = `<div class="err">${esc(data.error) || "Request failed."}</div>`; return; }
+        lastData = data; filter = "all";
+        renderRows();
+      } catch (e) {
+        out.innerHTML = `<div class="err">Network error: ${esc(e.message)}</div>`;
+      } finally {
+        runBtn.disabled = false; runBtn.textContent = label;
+      }
+    };
+  </script>
+</body>
+</html>

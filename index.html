@@ -225,7 +225,7 @@
         <h2>Sensitivity</h2>
         <span class="val" id="threshVal">0.90</span>
       </div>
-      <input id="threshold" type="range" min="0.5" max="1" step="0.01" value="0.9" />
+      <input id="threshold" type="range" min="0.3" max="1" step="0.01" value="0.9" />
       <div class="scale"><span>Fewer moves</span><span>Aggressive</span></div>
 
       <div class="steprow">
@@ -270,7 +270,7 @@
 
     // slider fill + value
     function paintSlider() {
-      const min = 0.5, max = 1, v = parseFloat(thresh.value);
+      const min = 0.3, max = 1, v = parseFloat(thresh.value);
       thresh.style.setProperty("--fill", ((v - min) / (max - min) * 100) + "%");
       threshVal.textContent = v.toFixed(2);
     }

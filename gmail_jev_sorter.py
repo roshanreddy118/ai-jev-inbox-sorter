@@ -85,16 +85,96 @@ def _plain_body(msg: email.message.Message, limit: int = 4000) -> str:
     return ""
 
 
-def find_spam_folder(imap: imaplib.IMAP4_SSL) -> str:
-    """Return the mailbox flagged \\Junk (Gmail's Spam), or the Gmail default."""
+def _find_folder(imap: imaplib.IMAP4_SSL, flag: str, default: str) -> str:
+    """Return the mailbox carrying a special-use flag (e.g. \\Junk, \\Trash),
+    falling back to the Gmail default name."""
     typ, boxes = imap.list()
     if typ == "OK":
         for raw in boxes:
             line = raw.decode(errors="replace")
-            if "\\Junk" in line:
+            if flag in line:
                 # mailbox name is the quoted segment at the end of the LIST line
                 return line.split(' "/" ')[-1].strip().strip('"')
-    return "[Gmail]/Spam"
+    return default
+
+
+def find_spam_folder(imap: imaplib.IMAP4_SSL) -> str:
+    """Return the mailbox flagged \\Junk (Gmail's Spam), or the Gmail default."""
+    return _find_folder(imap, "\\Junk", "[Gmail]/Spam")
+
+
+def find_trash_folder(imap: imaplib.IMAP4_SSL) -> str:
+    """Return the mailbox flagged \\Trash (Gmail's Trash), or the Gmail default."""
+    return _find_folder(imap, "\\Trash", "[Gmail]/Trash")
+
+
+def _search_message_id(imap: imaplib.IMAP4_SSL, mid: str) -> list:
+    """Find a message in the selected folder by its Message-ID header.
+
+    Gmail's IMAP search is fussy about the value: it must be a quoted string,
+    and it sometimes matches only the bracket-stripped form. Try the exact value
+    first, then the form without angle brackets. Returns a list of message nums
+    (empty if not found)."""
+    candidates = [mid]
+    stripped = mid.strip("<>")
+    if stripped and stripped != mid:
+        candidates.append(stripped)
+    for value in candidates:
+        # pass the value as a single quoted IMAP string literal
+        typ, data = imap.search(None, "HEADER", "Message-ID", f'"{value}"')
+        if typ == "OK" and data and data[0]:
+            return data[0].split()
+    return []
+
+
+def act_on_messages(gmail: str, app_password: str, message_ids: list,
+                    action: str) -> dict:
+    """Trash or permanently delete specific messages that are currently in Spam.
+
+    message_ids: list of RFC822 Message-ID header values (as returned in the
+      moved items from sort_inbox).
+    action: "trash"  -> move Spam -> Trash (recoverable ~30 days)
+            "delete" -> permanently expunge from Spam (IRREVERSIBLE)
+
+    Credentials used only for this call, never stored/logged. Returns
+    {"action", "requested", "done", "not_found"}. Targets messages ONLY by
+    exact Message-ID within the Spam folder, so it can never touch inbox mail.
+    """
+    if action not in ("trash", "delete"):
+        raise ValueError("action must be 'trash' or 'delete'")
+    ids = [m for m in (mid.strip() for mid in message_ids) if m]
+    if not ids:
+        return {"action": action, "requested": 0, "done": 0, "not_found": 0}
+
+    imap = imaplib.IMAP4_SSL(IMAP_HOST)
+    imap.login(gmail, app_password)
+    try:
+        spam = find_spam_folder(imap)
+        imap.select(spam, readonly=False)
+        trash = find_trash_folder(imap) if action == "trash" else None
+
+        done = not_found = 0
+        for mid in ids:
+            nums = _search_message_id(imap, mid)
+            if not nums:
+                not_found += 1
+                continue
+            for num in nums:
+                if action == "trash":
+                    imap.copy(num, trash)          # place a copy in Trash
+                    imap.store(num, "+FLAGS", "\\Deleted")  # remove from Spam
+                else:  # permanent delete
+                    imap.store(num, "+FLAGS", "\\Deleted")
+            done += 1
+        imap.expunge()  # apply the \Deleted flags in Spam
+        return {"action": action, "requested": len(ids),
+                "done": done, "not_found": not_found}
+    finally:
+        try:
+            imap.close()
+        except Exception:
+            pass
+        imap.logout()
 
 
 def should_move(answer: dict, threshold: float) -> bool:
@@ -176,6 +256,8 @@ def sort_inbox(gmail: str, app_password: str, threshold: float = 0.95,
             msg = email.message_from_bytes(msg_data[0][1])
             emails.append({
                 "id": num.decode(),
+                # stable across the move to Spam, so /api/act can re-find it
+                "message_id": (msg.get("Message-ID") or "").strip(),
                 "from": _decode(msg.get("From", "")),
                 "subject": _decode(msg.get("Subject", "")),
                 "body": _plain_body(msg),
@@ -200,6 +282,8 @@ def sort_inbox(gmail: str, app_password: str, threshold: float = 0.95,
                 "choice": ans.get("choice"),
                 "confidence": round(float(ans.get("confidence", 0.0)), 4),
                 "moved": bool(move),  # in dry-run this means "would move"
+                # only meaningful when actually moved live; used by /api/act
+                "message_id": e["message_id"] if (move and live) else "",
                 "subject": e["subject"][:120],
                 "from": e["from"][:80],
             })

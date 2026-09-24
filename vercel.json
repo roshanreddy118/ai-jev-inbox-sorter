@@ -2,6 +2,9 @@
   "functions": {
     "api/sort.py": {
       "maxDuration": 60
+    },
+    "api/act.py": {
+      "maxDuration": 60
     }
   }
 }

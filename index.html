@@ -158,6 +158,19 @@
     .tag.keep { background:var(--ok-bg); color:var(--ok); }
     .tag.low  { background:rgba(255,255,255,.55); color:var(--muted); }
 
+    /* post-move cleanup actions */
+    .bulk { display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+            padding:10px 12px; margin-bottom:10px; border-radius:12px;
+            background:rgba(255,255,255,.45); }
+    .bulklabel { font-size:11px; font-weight:600; color:var(--muted); flex:1; min-width:120px; }
+    .acts { display:flex; gap:6px; flex:none; }
+    .mini { font-family:inherit; font-size:12px; font-weight:700; cursor:pointer;
+            border:1.5px solid transparent; border-radius:9px; padding:6px 10px; }
+    .mini.trash { background:rgba(255,255,255,.6); color:var(--muted); }
+    .mini.trash:hover { border-color:var(--muted); }
+    .mini.del { background:var(--danger-bg); color:var(--danger); }
+    .mini.del:hover { border-color:var(--danger); }
+
     /* empty state: hidden on mobile (would just be dead space), shown on desktop */
     .empty { display:none; text-align:center; }
     .emptyIcon { font-size:34px; }
@@ -306,23 +319,88 @@
         <button class="chip info ${filter==='all'?'active':''}" data-f="all">Checked ${d.checked}${d.skipped ? " · skipped " + d.skipped : ""}</button>
       </div>`;
 
+      // message_ids only exist on items actually moved live -> can be acted on
+      const actable = d.items.filter(it => it.moved && it.message_id);
+      if (actable.length) {
+        html += `<div class="bulk">
+          <span class="bulklabel">${actable.length} in Spam · clean up?</span>
+          <button class="mini trash" data-bulk="trash">Trash all</button>
+          <button class="mini del" data-bulk="delete">Delete all</button>
+        </div>`;
+      }
+
       if (!d.items.length) html += `<div class="status">No unread messages to check.</div>`;
       else if (!rows.length) html += `<div class="status">Nothing in this filter.</div>`;
       for (const it of rows) {
         const isSpam = it.moved || it.choice === "SPAM";
-        html += `<div class="item ${isSpam ? "spam" : ""}">
+        const canAct = it.moved && it.message_id;
+        html += `<div class="item ${isSpam ? "spam" : ""}" data-mid="${esc(it.message_id)}">
           <div class="bar"></div>
           <div class="meta">
             <div class="subj">${esc(it.subject) || "(no subject)"}</div>
             <div class="from">${esc(it.from)}</div>
-          </div>${tag(it)}</div>`;
+          </div>
+          ${canAct ? `<div class="acts">
+            <button class="mini trash" data-act="trash" title="Move to Trash">🗑</button>
+            <button class="mini del" data-act="delete" title="Delete permanently">✕</button>
+          </div>` : tag(it)}</div>`;
       }
       out.innerHTML = html;
+
       out.querySelectorAll(".chip[data-f]").forEach(c => c.onclick = () => {
         const f = c.dataset.f;
         filter = (filter === f && f !== "all") ? "all" : f;  // click active to clear
         renderRows();
       });
+      // per-row trash/delete
+      out.querySelectorAll(".item [data-act]").forEach(b => b.onclick = () => {
+        const mid = b.closest(".item").dataset.mid;
+        actOnMessages([mid], b.dataset.act);
+      });
+      // bulk trash/delete all moved
+      out.querySelectorAll("[data-bulk]").forEach(b => b.onclick = () => {
+        const ids = actable.map(it => it.message_id);
+        actOnMessages(ids, b.dataset.bulk);
+      });
+    }
+
+    async function actOnMessages(ids, action) {
+      ids = ids.filter(Boolean);
+      if (!ids.length) return;
+      if (action === "delete") {
+        const many = ids.length > 1 ? `these ${ids.length} messages` : "this message";
+        if (!confirm(`Permanently delete ${many}? This cannot be undone.`)) return;
+      }
+      const bar = document.createElement("div");
+      bar.className = "status"; bar.innerHTML = `<span class="spin"></span>Working…`;
+      out.prepend(bar);
+      try {
+        const res = await fetch("/api/act", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            gmail: $("gmail").value.trim(), app_password: pw.value,
+            message_ids: ids, action, confirm: action === "delete" ? true : undefined,
+          }),
+        });
+        const r = await res.json();
+        if (!res.ok) { bar.className = "err"; bar.textContent = r.error || "Action failed."; return; }
+        // drop the acted-on ids from local results and re-render
+        const gone = new Set(ids);
+        lastData.items = lastData.items.map(it =>
+          gone.has(it.message_id) ? { ...it, moved: false, message_id: "",
+            choice: "NOT_SPAM", subject: it.subject, from: it.from,
+            _acted: action } : it);
+        lastData.moved = lastData.items.filter(it => it.moved).length;
+        renderRows();
+        const verb = r.action === "delete" ? "Deleted" : "Trashed";
+        const note = document.createElement("div");
+        note.className = "status";
+        note.textContent = `${verb} ${r.done}` +
+          (r.not_found ? ` · ${r.not_found} not found in Spam` : "");
+        out.prepend(note);
+      } catch (e) {
+        bar.className = "err"; bar.textContent = "Network error: " + e.message;
+      }
     }
 
     runBtn.onclick = async () => {

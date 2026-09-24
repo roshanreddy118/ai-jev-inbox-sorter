@@ -26,6 +26,7 @@ import email
 import imaplib
 import os
 import sys
+import time
 from email.header import decode_header, make_header
 
 from jev_test import ask_jev  # reuse the verified Jev call
@@ -108,22 +109,49 @@ def find_trash_folder(imap: imaplib.IMAP4_SSL) -> str:
     return _find_folder(imap, "\\Trash", "[Gmail]/Trash")
 
 
-def _search_message_id(imap: imaplib.IMAP4_SSL, mid: str) -> list:
-    """Find a message in the selected folder by its Message-ID header.
+def _search_message_id_once(imap: imaplib.IMAP4_SSL, mid: str) -> list:
+    """One search pass for a Message-ID in the selected folder.
 
-    Gmail's IMAP search is fussy about the value: it must be a quoted string,
-    and it sometimes matches only the bracket-stripped form. Try the exact value
-    first, then the form without angle brackets. Returns a list of message nums
-    (empty if not found)."""
-    candidates = [mid]
-    stripped = mid.strip("<>")
-    if stripped and stripped != mid:
-        candidates.append(stripped)
-    for value in candidates:
-        # pass the value as a single quoted IMAP string literal
+    Prefer Gmail's native ``X-GM-RAW rfc822msgid:`` search: it queries the same
+    core index as the Gmail search box, which reflects a just-moved message far
+    sooner than IMAP's generic HEADER index (that lag is what made freshly-moved
+    mail come back 'not found'). Fall back to the standard, quoted HEADER search
+    for non-Gmail servers or if the raw search errors."""
+    bare = mid.strip("<>")
+    # 1) Gmail-native message-id search (fast index)
+    if bare:
+        try:
+            typ, data = imap.search(None, "X-GM-RAW", f"rfc822msgid:{bare}")
+            if typ == "OK" and data and data[0]:
+                return data[0].split()
+        except Exception:
+            pass  # not Gmail, or raw search unsupported -> fall back
+    # 2) standard HEADER search, exact then bracket-stripped, value quoted
+    for value in ([mid, bare] if bare and bare != mid else [mid]):
         typ, data = imap.search(None, "HEADER", "Message-ID", f'"{value}"')
         if typ == "OK" and data and data[0]:
             return data[0].split()
+    return []
+
+
+def _search_message_id(imap: imaplib.IMAP4_SSL, mid: str,
+                       retries: int = 2, delay: float = 0.8) -> list:
+    """Find a message by Message-ID, retrying briefly.
+
+    A message copied into Spam moments earlier may not be in Gmail's header
+    search index yet, so a first lookup can miss even though the message is
+    there. Retry with a short delay to let the index catch up.
+
+    ponytail: small fixed backoff, capped at retries*delay (~1.6s) per id so a
+    Delete-all of already-gone ids can't approach the 60s function limit. A UID
+    handle captured at COPY time would be exact and instant, but that means
+    threading UIDs through the whole move flow — not worth it for cleanup."""
+    for attempt in range(retries):
+        nums = _search_message_id_once(imap, mid)
+        if nums:
+            return nums
+        if attempt < retries - 1:
+            time.sleep(delay)
     return []
 
 

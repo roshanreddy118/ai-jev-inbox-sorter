@@ -304,6 +304,13 @@
     const esc = (s) => (s || "").replace(/[&<>"']/g,
       c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 
+    // On mobile the results sit below the fold; nudge them into view. On desktop
+    // (two-column layout, >=900px) results are already visible, so do nothing.
+    function scrollToResultsOnMobile() {
+      if (window.matchMedia("(min-width:900px)").matches) return;
+      out.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+
     // last results + which filter is active: "all" | "moved" | "kept"
     let lastData = null, filter = "all";
 
@@ -426,6 +433,7 @@
         if (!res.ok) { out.innerHTML = `<div class="err">${esc(data.error) || "Request failed."}</div>`; return; }
         lastData = data; filter = "all";
         renderRows();
+        scrollToResultsOnMobile();
       } catch (e) {
         out.innerHTML = `<div class="err">Network error: ${esc(e.message)}</div>`;
       } finally {
